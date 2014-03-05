@@ -1,6 +1,7 @@
 package coretest
 
 import (
+	"bytes"
 	"path"
 	"io/ioutil"
 	"os/exec"
@@ -13,35 +14,12 @@ const cloudinitBinPath = "/usr/bin/coreos-cloudinit"
 const cloudinitWorkspace = "/var/lib/coreos-cloudinit"
 
 func run(command string, args ...string) (string, string, error) {
+	var stdoutBytes, stderrBytes bytes.Buffer
 	cmd := exec.Command(command, args...)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", "", err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return "", "", err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return "", "", err
-	}
-
-	stdoutBytes, err := ioutil.ReadAll(stdout)
-	if err != nil {
-		return "", "", err
-	}
-	stderrBytes, err := ioutil.ReadAll(stderr)
-	if err != nil {
-		return "", "", err
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return "", "", err
-	}
-
-	return string(stdoutBytes), string(stderrBytes), nil
+	cmd.Stdout = &stdoutBytes
+	cmd.Stderr = &stderrBytes
+	err := cmd.Run()
+	return stdoutBytes.String(), stderrBytes.String(), err
 }
 
 func write(filename string, contents string) error {
@@ -68,7 +46,7 @@ ssh_authorized_keys:
 	}
 	defer syscall.Unlink(config_path)
 
-	if stdout, stderr, err := run(cloudinitBinPath, "--from-file", config_path); err != nil {
+	if stdout, stderr, err := run(cloudinitBinPath, "--from-file", config_path, "--ssh-key-name", "coretest"); err != nil {
 		t.Fatalf("coreos-cloudinit failed with error: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
@@ -80,7 +58,7 @@ ssh_authorized_keys:
 	}
 
 	// Attempt to clean up after ourselves
-	defer run("update-ssh-keys", "-d", "coreos-init")
+	defer run("update-ssh-keys", "-d", "coretest")
 
 	// Run grep directly since update-ssh-keys won't report multiple keys under the same name
 	stdout, stderr, err := run("grep", "-q", "cloudinit-test-key-one", "/home/core/.ssh/authorized_keys")

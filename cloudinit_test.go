@@ -3,7 +3,9 @@ package coretest
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -23,10 +25,6 @@ func run(command string, args ...string) (string, string, error) {
 	return stdoutBytes.String(), stderrBytes.String(), err
 }
 
-func write(filename string, contents string) error {
-	return ioutil.WriteFile(filename, []byte(contents), 0644)
-}
-
 func read(filename string) (string, error) {
 	bytes, err := ioutil.ReadFile(filename)
 	return string(bytes), err
@@ -44,14 +42,18 @@ ssh_authorized_keys:
     - %s
     - %s
 `
-	config := fmt.Sprintf(configTmpl, keyOne, keyTwo)
-	config_path := "/tmp/coretest-cloudinit-user-data-cloud-config"
-	if err := write(config_path, config); err != nil {
-		t.Fatalf("Failed writing %s: %v", config_path, err)
+	configData := fmt.Sprintf(configTmpl, keyOne, keyTwo)
+	configFile, err := ioutil.TempFile(os.TempDir(), "coretest-")
+	if err != nil {
+		t.Fatalf("Failed creating tempfile: %v", err)
 	}
-	defer syscall.Unlink(config_path)
+	defer syscall.Unlink(configFile.Name())
 
-	if stdout, stderr, err := run(cloudinitBinPath, "--from-file", config_path, "--ssh-key-name", "coretest"); err != nil {
+	if _, err := io.WriteString(configFile, configData); err != nil {
+		t.Fatalf("Failed writing %s: %v", configFile.Name(), err)
+	}
+
+	if stdout, stderr, err := run(cloudinitBinPath, "--from-file", configFile.Name(), "--ssh-key-name", "coretest"); err != nil {
 		t.Fatalf("coreos-cloudinit failed with error: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 
@@ -80,16 +82,20 @@ ssh_authorized_keys:
 }
 
 func TestCloudinitScript(t *testing.T) {
-	config := `#!/bin/bash
+	configData := `#!/bin/bash
 /bin/sleep 10
 `
-	script_path := "/tmp/coretest-cloudinit-user-data-script"
-	if err := write(script_path, config); err != nil {
-		t.Fatalf("Failed writing %s: %v", script_path, err)
+	configFile, err := ioutil.TempFile(os.TempDir(), "coretest-")
+	if err != nil {
+		t.Fatalf("Failed creating tempfile: %v", err)
 	}
-	defer syscall.Unlink(script_path)
+	defer syscall.Unlink(configFile.Name())
 
-	if stdout, stderr, err := run(cloudinitBinPath, "--from-file", script_path); err != nil {
+	if _, err := io.WriteString(configFile, configData); err != nil {
+		t.Fatalf("Failed writing %s: %v", configFile.Name(), err)
+	}
+
+	if stdout, stderr, err := run(cloudinitBinPath, "--from-file", configFile.Name()); err != nil {
 		t.Fatalf("coreos-cloudinit failed with error: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
 	}
 

@@ -2,9 +2,10 @@ package coretest
 
 import (
 	"bytes"
-	"path"
+	"fmt"
 	"io/ioutil"
 	"os/exec"
+	"path"
 	"strings"
 	"syscall"
 	"testing"
@@ -32,14 +33,18 @@ func read(filename string) (string, error) {
 }
 
 func TestCloudinitCloudConfig(t *testing.T) {
-	config := `#cloud-config
+	keyOne := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC5LaGMGRqZEEvOhHlIEiQgdMJIQ9Qe8L/XSz06GqzcESbEnYLIXar2nou4eW4AGMVC1V0BrcWWnSTxM1/dWeCLOUt5NulKAjtdBUZGhCT83nbimSzbmx3/q2y5bCiS4Zr8ZjYFbi1eLvye2jKPE4xo7cvIfDKc0ztQ9kU7JknUdKNZo3RKXr5EPhJ5UZ8Ff15CI9+hDSvdPwer+HNnEt/psRVC+s29EwNGwUXD4IYqrk3X4ew0YAl/oULHM4cctoBW9GM+kAl40rOuIARlKfe4UdCgDMHYA/whi7Us+cPNgPit9IVJVBU4eo/cF5molD2l+PMSntypuv79obu8sA1H cloudinit-test-key-one"
+	keyTwo := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCZw5Ljtt9wlEfyDvmUwu/BeMcIhVarbcM4ajZolxRy9G8vvCa7ODcSjzSyhfG1mLSBB2KfaFFI6zGHBjFX0Gzy9i8m3u7PnZBPX30bb1n0hJCrUhpqUGQUe8OFdoBstf1HIwJU/KoTBL0Ap1WEn0quRT4kNgBLbPrMjYCPbS1q4wJKdIE5rRm/EfTUrmIb0i91gujEGw5oUHDXf0X+/cxwwIVZh1z16YhOgvJBzXhsJ9a0w7kcy/6wPRv03yyMg/r2Ada6ci68LulKz5GLn+xInT0bvIcra/PZ7WE+jyZhZKly239VZyT/1dHkBbTw+kgnGobLMbjOOg5bKaT8NZJ3 cloudinit-test-key-two"
+
+	configTmpl := `#cloud-config
 coreos:
     etcd:
         discovery_url: https://discovery.etcd.io/827c73219eeb2fa5530027c37bf18877
 ssh_authorized_keys:
-    - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC5LaGMGRqZEEvOhHlIEiQgdMJIQ9Qe8L/XSz06GqzcESbEnYLIXar2nou4eW4AGMVC1V0BrcWWnSTxM1/dWeCLOUt5NulKAjtdBUZGhCT83nbimSzbmx3/q2y5bCiS4Zr8ZjYFbi1eLvye2jKPE4xo7cvIfDKc0ztQ9kU7JknUdKNZo3RKXr5EPhJ5UZ8Ff15CI9+hDSvdPwer+HNnEt/psRVC+s29EwNGwUXD4IYqrk3X4ew0YAl/oULHM4cctoBW9GM+kAl40rOuIARlKfe4UdCgDMHYA/whi7Us+cPNgPit9IVJVBU4eo/cF5molD2l+PMSntypuv79obu8sA1H cloudinit-test-key-one
-    - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCZw5Ljtt9wlEfyDvmUwu/BeMcIhVarbcM4ajZolxRy9G8vvCa7ODcSjzSyhfG1mLSBB2KfaFFI6zGHBjFX0Gzy9i8m3u7PnZBPX30bb1n0hJCrUhpqUGQUe8OFdoBstf1HIwJU/KoTBL0Ap1WEn0quRT4kNgBLbPrMjYCPbS1q4wJKdIE5rRm/EfTUrmIb0i91gujEGw5oUHDXf0X+/cxwwIVZh1z16YhOgvJBzXhsJ9a0w7kcy/6wPRv03yyMg/r2Ada6ci68LulKz5GLn+xInT0bvIcra/PZ7WE+jyZhZKly239VZyT/1dHkBbTw+kgnGobLMbjOOg5bKaT8NZJ3 cloudinit-test-key-two
+    - %s
+    - %s
 `
+	config := fmt.Sprintf(configTmpl, keyOne, keyTwo)
 	config_path := "/tmp/coretest-cloudinit-user-data-cloud-config"
 	if err := write(config_path, config); err != nil {
 		t.Fatalf("Failed writing %s: %v", config_path, err)
@@ -60,15 +65,17 @@ ssh_authorized_keys:
 	// Attempt to clean up after ourselves
 	defer run("update-ssh-keys", "-d", "coretest")
 
-	// Run grep directly since update-ssh-keys won't report multiple keys under the same name
-	stdout, stderr, err := run("grep", "-q", "cloudinit-test-key-one", "/home/core/.ssh/authorized_keys")
+	authorized_keys, err := read("/home/core/.ssh/authorized_keys")
 	if err != nil {
-		t.Errorf("Could not find first key in authorized_keys: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+		t.Fatalf("Unable to read authorized_keys file: %v", err)
 	}
 
-	stdout, stderr, err = run("grep", "-q", "cloudinit-test-key-two", "/home/core/.ssh/authorized_keys")
-	if err != nil {
-		t.Errorf("Could not find second key in authorized_keys: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	if !strings.Contains(authorized_keys, keyOne) {
+		t.Errorf("Could not find first key in authorized_keys")
+	}
+
+	if !strings.Contains(authorized_keys, keyTwo) {
+		t.Errorf("Could not find second key in authorized_keys")
 	}
 }
 
